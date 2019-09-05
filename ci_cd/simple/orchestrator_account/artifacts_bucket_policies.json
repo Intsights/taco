@@ -1,0 +1,72 @@
+{
+    "Version": "2012-10-17",
+    "Id": "SSEAndSSLPolicy",
+    "Statement": [
+        {
+            "Sid": "DenyUnEncryptedObjectUploads",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::ci-cd-artifacts-bucket/*",
+            "Condition": {
+                "StringNotEquals": {
+                    "s3:x-amz-server-side-encryption": "aws:kms"
+                }
+            }
+        },
+        {
+            "Sid": "DenyInsecureConnections",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:*",
+            "Resource": "arn:aws:s3:::ci-cd-artifacts-bucket/*",
+            "Condition": {
+                "Bool": {
+                    "aws:SecureTransport": "false"
+                }
+            }
+        },
+        {
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::111111111111:root"
+            },
+            "Action": [
+                "s3:Get*",
+                "s3:Put*"
+            ],
+            "Resource": "arn:aws:s3:::ci-cd-artifacts-bucket/*"
+        },
+        {
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::111111111111:root"
+            },
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::ci-cd-artifacts-bucket"
+        },
+        {
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::333333333333:root"
+            },
+            "Action": [
+                "s3:Get*",
+                "s3:Put*"
+            ],
+            "Resource": "arn:aws:s3:::ci-cd-artifacts-bucket/*"
+        },
+        {
+            "Sid": "",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::333333333333:root"
+            },
+            "Action": "s3:ListBucket",
+            "Resource": "arn:aws:s3:::ci-cd-artifacts-bucket"
+        }
+    ]
+}

@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+
+ BuildOutputS3BucketName:
+  Type: String
+
+ BuildOutputS3ObjectKey:
+  Type: String
+
+ FunctionsTimeout:
+  Type: Number
+  Default: 900
+
+ FunctionsRuntime:
+  Type: String
+  Default: "python3.6"
+
+ FunctionsMemorySize:
+  Type: Number
+  Default: 192
+
+ BatchSize:
+   Type: Number
+   Description: "Number of messages to get in once"
+   Default: 10
+
+ MessageRetentionPeriod:
+   Type: Number
+   Description: "The length of time, in seconds, for which Amazon SQS retains a message. (1 hours default)"
+   Default: 10800
+
+ DelaySeconds:
+   Type: Number
+   Description: "The length of time, in seconds, for which the delivery of all messages in the queue is delayed"
+   Default: 0
+
+ QueueMaxReceiveCount:
+   Type: Number
+   Default: 1
+
+Resources:
+
+# --- SQS ---
+  ExampleSQSDLQ:
+    Type: AWS::SQS::Queue
+
+  ExampleSQS:
+    Type: AWS::SQS::Queue
+    Properties:
+      DelaySeconds: !Ref DelaySeconds
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      QueueName: filter-domain
+      VisibilityTimeout: !Ref FunctionsTimeout
+      RedrivePolicy:
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - "ExampleSQSDLQ"
+            - "Arn"
+
+# --- Roles ---
+  LambdaExecutionRoleIncludingS3:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        # Provides read only access to Amazon SSM.
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+
+        # Provides Put, Get access to S3 and full access to CloudWatch Logs.
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+
+        # Provides receive message, delete message, and read attribute access to SQS queues, and write permissions to CloudWatch logs.
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+# --- Lambda(s) ---
+  ExampleLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: "my_example_lambda"
+      Code:
+        S3Bucket: !Ref BuildOutputS3BucketName
+        S3Key: !Ref BuildOutputS3ObjectKey
+      Handler: app.my_example_lambda
+      MemorySize: !Ref FunctionsMemorySize
+      Timeout: !Ref FunctionsTimeout
+      Runtime: !Ref FunctionsRuntime
+      Role: !GetAtt LambdaExecutionRoleIncludingS3.Arn
+
+# --- Events <-> Lambda(s) ---
+  ExampleMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: !Ref BatchSize
+      Enabled: true
+      EventSourceArn: !GetAtt ExampleSQS.Arn
+      FunctionName: !GetAtt ExampleLambda.Arn
+
+
+Transform: AWS::Serverless-2016-10-31

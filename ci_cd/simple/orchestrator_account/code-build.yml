@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "code-build-services"
+
+Parameters:
+  KMSKeyArn:
+    Description: ARN of the KMS key
+    Type: String
+    Default: arn:aws:kms:us-east-1:555555555555:key/ffffffff-8888-8888-bbbb-777777777777
+
+Resources:
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref AWS::StackName
+      ServiceRole: !Ref CodeBuildRole
+      EncryptionKey: !Ref KMSKeyArn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci_cd/simple/app_sample/buildspec.yml
+        GitCloneDepth: 1
+
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/python:3.6.5
+      TimeoutInMinutes: 10
+
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codebuild.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CodeBuildAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - '*'
+                Effect: Allow
+                Resource: '*'
+
+
+Outputs:
+
+  CodeBuild:
+    Description: "FN export value for other"
+    Value: !Ref AWS::StackName
+    Export:
+      Name: 'my-CodeBuild-job'

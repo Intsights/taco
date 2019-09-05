@@ -1,0 +1,250 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Code pipeline Example Cross Account"
+
+Parameters:
+
+  GitOAuthToken:
+    Description: "OAuthToken for the above repository"
+    Type: String
+    Default: "She brings home a sword. If you ask me, she should've brought home a man"
+
+  KMSKeyArn:
+    Description: ARN of the CI/CD artifacts KMS key
+    Type: String
+    Default: arn:aws:kms:us-east-1:555555555555:key/ffffffff-8888-8888-bbbb-777777777777
+
+  CICDArtifactsBucket:
+    Description: "The S3 bucket to use for codepipeline - bucket must already exist - example: codepipeline-us-east-1-773922028333"
+    Type: String
+    Default: 'ci-cd-artifacts-bucket'
+
+# --------- BRANCHES ---------
+  SourceBranchName:
+    Type: String
+    Default: 'master'
+
+  Repo:
+    Type: String
+    Default: 'Repo'
+
+  Owner:
+    Type: String
+    Default: 'Owner'
+
+# --------- ACCOUNTS ---------
+  TestAccount:
+    Description: Test account id
+    Type: String
+    Default: 111111111111
+
+  ProductionAccount:
+    Description: Production account id
+    Type: String
+    Default: 333333333333
+
+# --------- STACKS ---------
+  DeployedStackChangeSetName:
+    Type: String
+    Default: "cross-accounts-example-lambda-change-set"
+
+  DeployedStackName:
+    Type: String
+    Default: "cross-accounts-example-lambda"
+
+
+Resources:
+  AppPipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      Name: !Ref AWS::StackName
+      RoleArn: !GetAtt CodePipeLineRole.Arn
+      Stages:
+        -
+          Name: Source
+          Actions:
+            - Name: ExampleLambdaSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Branch: !Ref SourceBranchName
+                Owner: !Ref Owner
+                Repo: !Ref Repo
+                PollForSourceChanges: true
+                OAuthToken: !Ref GitOAuthToken
+
+              OutputArtifacts:
+                - Name: ExampleLambdaSourceCode
+              RunOrder: 1
+        -
+          Name: CodeBuild-TestingAndPackaging
+          Actions:
+            -
+              Name: CallCodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: ExampleLambdaSourceCode
+
+              OutputArtifacts:
+                - Name: BuildOutput
+                - Name: ExampleLambdaFunctions
+
+              Configuration:
+                PrimarySource: ExampleLambdaSourceCode
+
+                # Name of the code build job (this is deployed separately and we import from CloudFormation export
+                ProjectName: !ImportValue my-CodeBuild-job
+              RunOrder: 1
+
+        - Name: TestAccount  # Add addtional accounts by cloning this and calling it something else (like DeployStg)
+          Actions:          # Don't forget the additional account number parameter either
+            - Name: cfnCreateChangeSet
+              RoleArn: !Sub 'arn:aws:iam::${TestAccount}:role/CICD-Orchestrator-Access'
+              InputArtifacts:
+                - Name: BuildOutput
+                - Name: ExampleLambdaFunctions
+
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_IAM # Set this value to CAPABILITY_NAMED_IAM if you name you iam objects
+                ChangeSetName: !Ref DeployedStackChangeSetName
+                RoleArn: !Sub 'arn:aws:iam::${TestAccount}:role/CodePipelineCloudFormationdeployRole'
+                StackName: !Ref DeployedStackName
+                TemplatePath: BuildOutput::template.yml
+                ParameterOverrides: |
+                  {
+                     "BuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["ExampleLambdaFunctions", "BucketName"]},
+                     "BuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["ExampleLambdaFunctions", "ObjectKey"]}
+                  }
+              RunOrder: 1
+            - InputArtifacts: []
+              Name: !Join ["",[!Ref SourceBranchName, "-approval"]]
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: '1'
+                Provider: Manual
+              OutputArtifacts: []
+              Configuration:
+                CustomData: "Approval or Reject this change set"
+              RunOrder: 2
+
+            - Name: cfnExecuteChangeSet
+              RoleArn: !Sub 'arn:aws:iam::${TestAccount}:role/CICD-Orchestrator-Access'
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                ChangeSetName: !Ref DeployedStackChangeSetName
+                StackName: !Ref DeployedStackName
+                RoleArn: !Sub 'arn:aws:iam::${TestAccount}:role/CodePipelineCloudFormationdeployRole'
+              RunOrder: 3
+
+        - Name: ProductionAccount  # Add addtional accounts by cloning this and calling it something else (like DeployStg)
+          Actions:          # Don't forget the additional account number parameter either
+            - Name: cfnCreateChangeSet
+              RoleArn: !Sub 'arn:aws:iam::${ProductionAccount}:role/CICD-Orchestrator-Access'
+              InputArtifacts:
+                - Name: BuildOutput
+                - Name: ExampleLambdaFunctions
+
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_IAM # Set this value to CAPABILITY_NAMED_IAM if you name you iam objects
+                ChangeSetName: !Ref DeployedStackChangeSetName
+                RoleArn: !Sub 'arn:aws:iam::${ProductionAccount}:role/CodePipelineCloudFormationdeployRole'
+                StackName: !Ref DeployedStackName
+                TemplatePath: BuildOutput::template.yml
+                ParameterOverrides: |
+                  {
+                     "BuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["ExampleLambdaFunctions", "BucketName"]},
+                     "BuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["ExampleLambdaFunctions", "ObjectKey"]}
+                  }
+              RunOrder: 1
+            - InputArtifacts: []
+              Name: !Join ["",[!Ref SourceBranchName, "-approval"]]
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: '1'
+                Provider: Manual
+              OutputArtifacts: []
+              Configuration:
+                CustomData: "Approval or Reject this change set"
+              RunOrder: 2
+            - Name: cfnExecuteChangeSet
+              RoleArn: !Sub 'arn:aws:iam::${ProductionAccount}:role/CICD-Orchestrator-Access'
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                ChangeSetName: !Ref DeployedStackChangeSetName
+                StackName: !Ref DeployedStackName
+                RoleArn: !Sub 'arn:aws:iam::${ProductionAccount}:role/CodePipelineCloudFormationdeployRole'
+              RunOrder: 3
+
+
+      ArtifactStore:
+        Type: S3
+        Location: !Ref CICDArtifactsBucket
+        EncryptionKey:
+          Id: !Ref KMSKeyArn
+          Type: KMS
+
+  CodePipeLineRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "codepipeline.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+      -
+        PolicyName: "code-pipeline-access"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Effect: "Allow"
+              Action:
+                - "*"
+              Resource: "*"
+
+Outputs:
+
+  StackName:
+    Description: "ExampleLambdaStackPipeline"
+    Value: !Ref AWS::StackName
+
+  CodePipeLineJob:
+    Description: "Name of the code pipeline job created"
+    Value: !Ref AppPipeline

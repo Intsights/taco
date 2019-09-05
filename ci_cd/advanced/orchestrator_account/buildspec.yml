@@ -1,0 +1,83 @@
+#TODO: change this
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo Deployong Filters
+      - export RUNTIME_CONFIG_BUCKET="test-runtime-config-bucket"
+
+
+      # Install common layer
+      - chmod +x $CODEBUILD_SRC_DIR_CommonSourceCode/deploy/code_build/remote_installer.sh
+      - export PYTHONPATH=$PYTHONPATH:`$CODEBUILD_SRC_DIR_CommonSourceCode/deploy/code_build/remote_installer.sh`
+      - echo $PYTHONPATH
+
+      # Install and update other packages
+      - chmod +x $CODEBUILD_SRC_DIR_CommonSourceCode/python/common/deploy_helpers/code_build/os_packages_packages.sh
+      - $CODEBUILD_SRC_DIR_CommonSourceCode/python/common/deploy_helpers/code_build/os_packages_packages.sh
+      - pip3 install chalice
+      - apt-get install realpath
+
+      # Install Utils layers
+      - chmod +x $CODEBUILD_SRC_DIR_UtilsSourceCode/deploy/code_build/remote_installer.sh
+      - export PYTHONPATH=$PYTHONPATH:`$CODEBUILD_SRC_DIR_UtilsSourceCode/deploy/code_build/remote_installer.sh`
+      - echo $PYTHONPATH
+
+      # Install ConclusionDB layers
+      - chmod +x $CODEBUILD_SRC_DIR_ConclusionDBSourceCode/deploy/code_build/remote_installer.sh
+      - export PYTHONPATH=$PYTHONPATH:`$CODEBUILD_SRC_DIR_ConclusionDBSourceCode/deploy/code_build/remote_installer.sh`
+      - echo $PYTHONPATH
+
+
+  pre_build:
+    commands:
+
+      # Creating risk_assessment dir
+      - export RA_DIR=`realpath $CODEBUILD_SRC_DIR/..`
+      - export PYTHONPATH=$PYTHONPATH:$RA_DIR
+      - sudo mv $CODEBUILD_SRC_DIR $CODEBUILD_SRC_DIR/../risk_assessment
+
+      # Testing
+      - chmod +x $CODEBUILD_SRC_DIR_CommonSourceCode/python/common/deploy_helpers/code_build/run_tests.sh
+      - $CODEBUILD_SRC_DIR_CommonSourceCode/python/common/deploy_helpers/code_build/run_tests.sh $RA_DIR/risk_assessment/tests/filters/subdomain/. $RA_DIR/risk_assessment/tests/pytest.ini $RA_DIR/risk_assessment/tests/requirements.txt
+
+  build:
+    commands:
+
+      # Package
+      - cd $RA_DIR/risk_assessment/filters/subdomain
+      - mkdir package
+      - cd package
+      - pip3 install -r ../requirements.txt --target .
+
+artifacts:
+  secondary-artifacts:
+    BuildOutput:
+      discard-paths: yes
+      base-directory: $RA_DIR/risk_assessment/filters/subdomain/deploy/cloudformation
+      files:
+        - template.yml
+
+    LambdaFunctions:
+      base-directory: $RA_DIR/risk_assessment/filters/subdomain/
+      files:
+        - 'package/**/*'
+        - app.py
+        - 'chalicelib/**/*'
+
+    # ---- layers output ----
+    DBLayer:
+      base-directory: $CODEBUILD_SRC_DIR_ConclusionDBSourceCode
+      files:
+        - python/**/*
+
+    CommonLayer:
+      base-directory: $CODEBUILD_SRC_DIR_CommonSourceCode
+      files:
+        - python/**/*
+
+    UtilsLayer:
+      base-directory: $CODEBUILD_SRC_DIR_UtilsSourceCode
+      files:
+        - python/**/*

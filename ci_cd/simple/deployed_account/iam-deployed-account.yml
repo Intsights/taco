@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Role to be assumed by CodePipeline service cross account
+Parameters:
+  ArtifactsBucketName:
+    Description: CI.CD artifacts storage
+    Type: String
+    Default: 'ci-cd-artifacts-bucket'
+
+  OrchestratorAccountID:
+    Description: CI/CD ORCHESTRATOR
+    Type: String
+    Default: 555555555555
+
+  KMSKeyArn:
+    Description: ARN of the KMS key
+    Type: String
+    Default: arn:aws:kms:us-east-1:555555555555:key/ffffffff-8888-8888-bbbb-777777777777
+
+
+Resources:
+  CPCrossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CICD-Orchestrator-Access
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Ref OrchestratorAccountID
+            Action:
+              - sts:AssumeRole
+      Path: /
+  CPCrossAccountRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CodePipelineCrossAccountRolePolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action:
+              - cloudformation:*
+              - s3:*
+              - iam:PassRole
+            Resource: "*"
+          -
+            Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !Ref KMSKeyArn # Allow access to the KMS key in our deploy account
+      Roles:
+        -
+          !Ref CPCrossAccountRole
+  CodePipelineCloudFormationDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CodePipelineCloudFormationdeployRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+  CFDeployerPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CloadFormationDeployerPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Action:
+
+              # Adjust all this here as required, whatever your stack needs
+              - sqs:*
+              - lambda:*
+              - events:*
+              - iam:CreateRole
+              - iam:CreatePolicy
+              - iam:GetRole
+              - iam:DeleteRole
+              - iam:PutRolePolicy
+              - iam:PassRole
+              - iam:DeleteRolePolicy
+              - iam:AttachRolePolicy
+              - iam:DetachRolePolicy
+              - apigateway:*
+              - cloudformation:*
+              - kms:*
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: "*"
+          -
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetBucketPolicy
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+             - !Join ['',['arn:aws:s3:::',!Ref ArtifactsBucketName, '/*']]
+             - !Join ['',['arn:aws:s3:::',!Ref ArtifactsBucketName]]
+      Roles:
+        -
+          !Ref CodePipelineCloudFormationDeployRole

@@ -1,0 +1,35 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo Install Phase
+      - sudo apt-get update -y
+      - apt-get install realpath
+
+  pre_build:
+    commands:
+      - echo Pre Build Phase
+      # Creating risk_assessment dir
+      - export BaseDirectory=`realpath $CODEBUILD_SRC_DIR/..`
+      - echo `pwd`
+      - echo $CODEBUILD_SRC_DIR
+      - echo `ls -la `
+      - echo `ls -la $CODEBUILD_SRC_DIR`
+
+  build:
+    commands:
+      - echo Build Phase
+
+artifacts:
+  secondary-artifacts:
+    BuildOutput:
+      discard-paths: yes
+      base-directory: $CODEBUILD_SRC_DIR/ci_cd/simple/app_sample
+      files:
+        - template.yml
+
+    ExampleLambdaFunctions:
+      base-directory: $CODEBUILD_SRC_DIR/ci_cd/simple/app_sample
+      files:
+        - app.py

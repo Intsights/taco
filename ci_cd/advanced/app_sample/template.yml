@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+
+# Layers params:
+ CommonBuildOutputS3BucketName:
+  Type: String
+
+ CommonBuildOutputS3ObjectKey:
+  Type: String
+
+ ConclusionDBBuildOutputS3BucketName:
+  Type: String
+
+ ConclusionDBBuildOutputS3ObjectKey:
+  Type: String
+
+ UtilsBuildOutputS3BucketName:
+  Type: String
+
+ UtilsBuildOutputS3ObjectKey:
+  Type: String
+
+
+ BuildOutputS3BucketName:
+  Type: String
+
+ BuildOutputS3ObjectKey:
+  Type: String
+
+
+ SecurityGroupId:
+  Type: String
+
+ SubnetID:
+  Type: String
+
+ RuntimeConfigBucket:
+  Type: String
+
+ FunctionsTimeout:
+  Type: Number
+  Default: 900
+
+ FunctionsRuntime:
+  Type: String
+  Default: "python3.6"
+
+ FunctionsMemorySize:
+  Type: Number
+  Default: 192
+
+ BatchSize:
+   Type: Number
+   Description: "Number of messages to get in once"
+   Default: 10
+
+ MessageRetentionPeriod:
+   Type: Number
+   Description: "The length of time, in seconds, for which Amazon SQS retains a message. (1 hours default)"
+   Default: 10800
+
+ DelaySeconds:
+   Type: Number
+   Description: "The length of time, in seconds, for which the delivery of all messages in the queue is delayed"
+   Default: 0
+
+ QueueMaxReceiveCount:
+   Type: Number
+   Default: 1
+
+Resources:
+
+# --- Stacks ---
+  NestedCommonStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.amazonaws.com/ci-cd-artifacts-bucket/common_template.yml
+      TimeoutInMinutes: '60'
+      Parameters:
+        ExportedLayerName: 'Common-layer-NESTED'
+        CommonBuildOutputS3BucketName: !Ref CommonBuildOutputS3BucketName
+        CommonBuildOutputS3ObjectKey: !Ref CommonBuildOutputS3ObjectKey
+
+  NestedUtilsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.amazonaws.com/ci-cd-artifacts-bucket/utils_template.yml
+      TimeoutInMinutes: '60'
+      Parameters:
+        ExportedLayerName: 'Utils-layer-NESTED'
+        UtilsBuildOutputS3BucketName: !Ref UtilsBuildOutputS3BucketName
+        UtilsBuildOutputS3ObjectKey: !Ref UtilsBuildOutputS3ObjectKey
+
+  NestedConclusionDBStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.amazonaws.com/ci-cd-artifacts-bucket/conclusion_db_template.yml
+      TimeoutInMinutes: '60'
+      Parameters:
+        ExportedLayerName: 'ConclusionDB-layer-NESTED'
+        ConclusionDBBuildOutputS3BucketName: !Ref ConclusionDBBuildOutputS3BucketName
+        ConclusionDBBuildOutputS3ObjectKey: !Ref ConclusionDBBuildOutputS3ObjectKey
+
+# --- SQS ---
+  ExampleFunctionSQSDLQ:
+    Type: AWS::SQS::Queue
+
+  ExampleFunctionSQS:
+    Type: AWS::SQS::Queue
+    Properties:
+      DelaySeconds: !Ref DelaySeconds
+      MessageRetentionPeriod: !Ref MessageRetentionPeriod
+      QueueName: filter-domain
+      VisibilityTimeout: !Ref FunctionsTimeout
+      RedrivePolicy:
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - "ExampleFunctionSQSDLQ"
+            - "Arn"
+
+# --- Roles ---
+  LambdaExecutionRoleIncludingS3:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        # Provides read only access to Amazon SSM.
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+
+        # Provides Put, Get access to S3 and full access to CloudWatch Logs.
+        - arn:aws:iam::aws:policy/AWSLambdaExecute
+
+        # Provides minimum permissions for a Lambda function to execute while accessing a resource within a VPC - create, describe, delete network interfaces and write permissions to CloudWatch Logs.
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+        # Provides receive message, delete message, and read attribute access to SQS queues, and write permissions to CloudWatch logs.
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaSQSQueueExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+# --- Lambda(s) ---
+  ExampleLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: "example_function"
+      Code:
+        S3Bucket: !Ref BuildOutputS3BucketName
+        S3Key: !Ref BuildOutputS3ObjectKey
+      Handler: app.example_function
+      MemorySize: !Ref FunctionsMemorySize
+      Timeout: !Ref FunctionsTimeout
+      Runtime: !Ref FunctionsRuntime
+      Role: !GetAtt LambdaExecutionRoleIncludingS3.Arn
+      Environment:
+        Variables:
+          "RA_BOTO3_LOGGER_LOG_LEVELS": "50"
+          "RA_DEFAULT_LOGGER_LOG_LEVELS": "10"
+          "RUNTIME_CONFIG_BUCKET": !Ref RuntimeConfigBucket
+      Layers:
+        - !GetAtt NestedCommonStack.Outputs.CommonLayerVersion
+        - !GetAtt NestedUtilsStack.Outputs.UtilsLayerVersion
+        - !GetAtt NestedConclusionDBStack.Outputs.ConclusionDBLayerVersion
+      VpcConfig:
+        SubnetIds:
+          - !Ref SubnetID
+        SecurityGroupIds:
+          - !Ref SecurityGroupId
+
+# --- Events <-> Lambda(s) ---
+
+  EventFunctionMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: !Ref BatchSize
+      Enabled: true
+      EventSourceArn: !GetAtt ExampleFunctionSQS.Arn
+      FunctionName: !GetAtt ExampleLambda.Arn
+
+
+Transform: AWS::Serverless-2016-10-31

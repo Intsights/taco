@@ -1,0 +1,347 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Code pipeline Example Cross Account"
+
+Parameters:
+
+  GitOAuthToken:
+    Description: "OAuthToken for the above repository"
+    Type: String
+    Default: "She brings home a sword. If you ask me, she should've brought home a man"
+
+  KMSKeyArn:
+    Description: ARN of the KMS key
+    Type: String
+    Default: 'arn:aws:kms:us-east-1:555555555555:key/ffffffff-8888-8888-bbbb-777777777777'
+
+  CodePipeLineBucket:
+    Description: "Artifacts bucket"
+    Type: String
+    Default: 'ci-cd-artifacts-bucket'
+
+# --------- BRANCHES ---------
+  LambdaSourceBranchName:
+    Type: String
+    Default: 'develop'
+
+  CommonLayerSourceBranchName:
+    Type: String
+    Default: 'develop'
+
+  UtilsLayerSourceBranchName:
+    Type: String
+    Default: 'develop'
+
+  DBLayerSourceBranchName:
+    Type: String
+    Default: 'develop'
+
+  # --------- ACCOUNTS ---------
+  TestAccount:
+    Description: Test account id
+    Type: String
+    Default: 111111111111
+
+  ProductionAccount:
+    Description: Production account id
+    Type: String
+    Default: 333333333333
+
+# --------- STACKS ---------
+  DeployedStackChangeSetName:
+    Type: String
+    Default: "cross-accounts-change-set-name"
+
+  DeployedStackName:
+    Type: String
+    Default: "cross-accounts-stack-name"
+
+
+Resources:
+  AppPipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      Name: !Ref AWS::StackName
+      RoleArn: !GetAtt CodePipeLineRole.Arn
+      Stages:
+        -
+          Name: Source
+          Actions:
+            - Name: LambdaSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Branch: !Ref LambdaSourceBranchName
+                Owner: Intsights
+                Repo: RepoName
+                PollForSourceChanges: true
+                OAuthToken: !Ref GitOAuthToken
+
+              OutputArtifacts:
+                - Name: LambdaSourceCode
+              RunOrder: 1
+
+            - Name: CommonSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Branch: !Ref CommonLayerSourceBranchName
+                Owner: Intsights
+                Repo: Common-layer-repo-name
+                PollForSourceChanges: true
+                OAuthToken: !Ref GitOAuthToken
+
+              OutputArtifacts:
+                - Name: CommonSourceCode
+              RunOrder: 1
+
+            - Name: UtilsSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Branch: !Ref UtilsLayerSourceBranchName
+                Owner: Intsights
+                Repo: utils-layer-repo-name
+                PollForSourceChanges: true
+                OAuthToken: !Ref GitOAuthToken
+
+              OutputArtifacts:
+                - Name: UtilsSourceCode
+              RunOrder: 1
+
+            - Name: ConclusionDBSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              Configuration:
+                Branch: !Ref DBLayerSourceBranchName
+                Owner: Intsights
+                Repo: db-layer-repo-name
+                PollForSourceChanges: true
+                OAuthToken: !Ref GitOAuthToken
+
+              OutputArtifacts:
+                - Name: DBSourceCode
+              RunOrder: 1
+
+        -
+          Name: BuildPhase
+          Actions:
+            -
+              Name: CallCodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              InputArtifacts:
+                - Name: LambdaSourceCode
+                - Name: CommonSourceCode
+                - Name: UtilsSourceCode
+                - Name: DBSourceCode
+              OutputArtifacts:
+                - Name: BuildOutput
+                - Name: LambdaFunctions
+                - Name: CommonLayer
+                - Name: UtilsLayer
+                - Name: DBLayer
+
+              Configuration:
+                PrimarySource: LambdaSourceCode
+                ProjectName: !ImportValue code-build-cross-account-export
+                # ^name of the code build job (this is deployed separately and we import from cloudformation export vals
+              RunOrder: 1
+
+        - Name: TestAccount  # Add addtional accounts by cloning this and calling it something else (like DeployStg)
+          Actions:          # Don't forget the additional account number parameter either
+            - Name: cfnCreateChangeSet
+              RoleArn: !Sub 'arn:aws:iam::${TestAccount}:role/CodePipeline-Cross-Account-Role-Access'
+              InputArtifacts:
+                - Name: BuildOutput
+                - Name: LambdaFunctions
+                - Name: CommonLayer
+                - Name: UtilsLayer
+                - Name: DBLayer
+
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_IAM # Set this value to CAPABILITY_NAMED_IAM if you name you iam objects
+                ChangeSetName: !Ref DeployedStackChangeSetName
+                RoleArn: !Sub 'arn:aws:iam::${TestAccount}:role/CodePipeline-cloudformation-deploy-role'
+                StackName: !Ref DeployedStackName
+                TemplatePath: BuildOutput::template.yml
+                ParameterOverrides: |
+                  {
+                     "BuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["LambdaFunctions", "BucketName"]},
+                     "BuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["LambdaFunctions", "ObjectKey"]},
+
+                     "CommonBuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["CommonLayer", "BucketName"]},
+                     "CommonBuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["CommonLayer", "ObjectKey"]},
+
+                     "UtilsBuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["UtilsLayer", "BucketName"]},
+                     "UtilsBuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["UtilsLayer", "ObjectKey"]},
+
+                     "ConclusionDBBuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["DBLayer", "BucketName"]},
+                     "ConclusionDBBuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["DBLayer", "ObjectKey"]},
+
+                     "SecurityGroupId": "sg-0d1647b16156e5192",
+                     "SubnetID": "subnet-06889f372b975e222",
+
+                     "RuntimeConfigBucket": "runtime-config-bucket"
+
+                  }
+              RunOrder: 1
+            - InputArtifacts: []
+              Name: !Join ["",[!Ref LambdaSourceBranchName, "-approval"]]
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: '1'
+                Provider: Manual
+              OutputArtifacts: []
+              Configuration:
+                CustomData: "Approval or Reject this change set"
+              RunOrder: 2
+
+            - Name: cfnExecuteChangeSet
+              RoleArn: !Sub 'arn:aws:iam::${TestAccount}:role/CodePipeline-Cross-Account-Role-Access'
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                ChangeSetName: !Ref DeployedStackChangeSetName
+                StackName: !Ref DeployedStackName
+                RoleArn: !Sub 'arn:aws:iam::${TestAccount}:role/CodePipeline-cloudformation-deploy-role'
+              RunOrder: 3
+
+        - Name: ProductionAccount  # Add addtional accounts by cloning this and calling it something else (like DeployStg)
+          Actions:          # Don't forget the additional account number parameter either
+            - Name: cfnCreateChangeSet
+              RoleArn: !Sub 'arn:aws:iam::${ProductionAccount}:role/CodePipeline-Cross-Account-Role-Access'
+              InputArtifacts:
+                - Name: BuildOutput
+                - Name: LambdaFunctions
+                - Name: CommonLayer
+                - Name: UtilsLayer
+                - Name: DBLayer
+
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                Capabilities: CAPABILITY_IAM # Set this value to CAPABILITY_NAMED_IAM if you name you iam objects
+                ChangeSetName: !Ref DeployedStackChangeSetName
+                RoleArn: !Sub 'arn:aws:iam::${ProductionAccount}:role/CodePipeline-cloudformation-deploy-role'
+                StackName: !Ref DeployedStackName
+                TemplatePath: BuildOutput::template.yml
+                ParameterOverrides: |
+                  {
+                     "BuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["LambdaFunctions", "BucketName"]},
+                     "BuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["LambdaFunctions", "ObjectKey"]},
+
+                     "CommonBuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["CommonLayer", "BucketName"]},
+                     "CommonBuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["CommonLayer", "ObjectKey"]},
+
+                     "UtilsBuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["UtilsLayer", "BucketName"]},
+                     "UtilsBuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["UtilsLayer", "ObjectKey"]},
+
+                     "ConclusionDBBuildOutputS3BucketName" : { "Fn::GetArtifactAtt" : ["DBLayer", "BucketName"]},
+                     "ConclusionDBBuildOutputS3ObjectKey" : { "Fn::GetArtifactAtt" : ["DBLayer", "ObjectKey"]},
+
+
+                     "SecurityGroupId": "sg-04721647f96868627",
+                     "SubnetID": "subnet-028180c448917cc20",
+
+                     "RuntimeConfigBucket": "production-runtime-config"
+                  }
+              RunOrder: 1
+            - InputArtifacts: []
+              Name: !Join ["",[!Ref LambdaSourceBranchName, "-approval"]]
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: '1'
+                Provider: Manual
+              OutputArtifacts: []
+              Configuration:
+                CustomData: "Approval or Reject this change set"
+              RunOrder: 2
+            - Name: cfnExecuteChangeSet
+              RoleArn: !Sub 'arn:aws:iam::${ProductionAccount}:role/CodePipeline-Cross-Account-Role-Access'
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                ChangeSetName: !Ref DeployedStackChangeSetName
+                StackName: !Ref DeployedStackName
+                RoleArn: !Sub 'arn:aws:iam::${ProductionAccount}:role/CodePipeline-cloudformation-deploy-role'
+              RunOrder: 3
+
+
+      ArtifactStore:
+        Type: S3
+        Location: !Ref CodePipeLineBucket
+        EncryptionKey:
+          Id: !Ref KMSKeyArn
+          Type: KMS
+
+  CodePipeLineRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+#              AWS: "arn:aws:iam::743607508365:root"
+              Service:
+                - "codepipeline.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+      -
+        PolicyName: "code-pipeline-access"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Effect: "Allow"
+              Action:
+                - "*"
+              Resource: "*"
+
+Outputs:
+
+  StackName:
+    Description: "Stack Name"
+    Value: !Ref AWS::StackName
+
+  CodePipeLineJob:
+    Description: "Name of the code pipeline job created"
+    Value: !Ref AppPipeline
