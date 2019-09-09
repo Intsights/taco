@@ -15,7 +15,7 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type='text/markdown',
     url='https://github.com/Intsights/taco',
-    packages=setuptools.find_packages(exclude=['ci_cd', 'tests']),
+    packages=setuptools.find_packages(exclude=['ci_cd', 'taco.tests*']),
     classifiers=[
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
