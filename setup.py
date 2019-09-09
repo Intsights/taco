@@ -2,7 +2,7 @@ import setuptools
 import os.path
 
 tld_dir = os.path.abspath(os.path.dirname(__file__))
-with open(os.path.join(tld_dir, 'README.md'), encoding='utf-8') as fh:
+with open(os.path.join(tld_dir, 'README.md')) as fh:
     long_description = fh.read()
 
 
