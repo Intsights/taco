@@ -1,5 +1,5 @@
 # Welcome to Taco!
-**![Taco logo](https://github.com/Intsights/taco/blob/master/Taco-logo.png)**
+![Taco](https://github.com/Intsights/taco/raw/master/Taco-logo.png)
 ### TL;DR
 
 Taco is an open-source library that will help you navigate the AWS maze. You would be able to build a state of the art AWS based platform without the complexity that tends to accompany processes like this. On top of that, Taco contains CloudFormation detailed and yet simplistic templates for AWS based CI/CD process that, at the time of writing, you won't find this kind of templates anywhere else.
@@ -13,6 +13,11 @@ Taco is an open-source library that will help you navigate the AWS maze. You wou
 -   [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-install.html)
 -   [Botocore pythonic package](https://pypi.org/project/botocore/)
 -   [Boto3 python package](https://pypi.org/project/boto3/)
+
+### Installation:
+```
+ pip install IntsightsTaco
+ ```
 
 ### *Why Should You Choose Taco? BECAUSE IT IS SIMPLE!*
 **Do you want to create new SQS and send there a message? No problem!**
