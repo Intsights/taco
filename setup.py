@@ -23,7 +23,7 @@ setuptools.setup(
         'Operating System :: OS Independent',
     ],
     python_requires='>=3.6',
-    install_requires=['boto3>=1.9.130', 'botocore>=1.12.130', 'awscli'],
+    install_requires=['boto3>=1.9.224', 'botocore>=1.12.224', 'awscli>=1.16.234'],
 
     project_urls={  # Optional
         'Bug Reports': 'https://github.com/Intsights/taco/issues',
