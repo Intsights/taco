@@ -1,1 +1,1 @@
-name = "intsights-taco"
+name = "IntsightsTaco"
