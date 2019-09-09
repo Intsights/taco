@@ -14,6 +14,11 @@ Taco is an open-source library that will help you navigate the AWS maze. You wou
 -   [Botocore pythonic package](https://pypi.org/project/botocore/)
 -   [Boto3 python package](https://pypi.org/project/boto3/)
 
+### Installation:
+```
+ pip install IntsightsTaco
+ ```
+
 ### *Why Should You Choose Taco? BECAUSE IT IS SIMPLE!*
 **Do you want to create new SQS and send there a message? No problem!**
 
