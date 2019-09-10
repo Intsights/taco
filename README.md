@@ -34,7 +34,7 @@ sqs.create_queue(sqs_creation_config)
 sqs.send_message(queue_name=queue_name, data=message_body, delay_seconds=delay_seconds)
 ```
 **WAIT! THERE IS MORE!**
-Taco’s pythonic wrappers require exactly the same **4 parameters for initialization** - Faw code lines and you have access to 4th most common AWS services:
+Taco’s pythonic wrappers require exactly the same **4 parameters for initialization** - Few code lines and you have access to 4th most common AWS services:
 ```python
 # ---- Logger ----
 logger = taco.logger.logger.get_logger(name='initialize_wrappers_samples')
