@@ -1,0 +1,16 @@
+---
+info:
+  title: Taco
+  description: Intsights open-source wrappers library for some AWS resources and high
+    level management objects for distributed backend systems
+  x-cortex-git:
+    github:
+      alias: intsightsorg
+      repository: Intsights/taco
+  x-cortex-tag: taco
+  x-cortex-type: service
+  x-cortex-domain-parents:
+  - tag: threatintel-rd
+openapi: 3.0.1
+servers:
+- url: "/"
